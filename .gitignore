@@ -1,0 +1,10 @@
+﻿__pycache__/
+*.pyc
+venv/
+.env
+yolov8n.pt
+*.sqlite3
+*.db
+.DS_Store
+vdo.mp4
+vdo1.mp4

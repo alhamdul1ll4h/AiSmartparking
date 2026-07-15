@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Parking System - Multi Zone</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', Tahoma, sans-serif; }
+        body { background-color: #0f172a; color: #f8fafc; height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
+        
+        header { background-color: #1e293b; padding: 15px 30px; display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #334155; }
+        header h1 { font-size: 24px; color: #38bdf8; }
+        
+        /* 🟢 ปุ่มสลับโซน */
+        .zone-selector { display: flex; gap: 5px; background: #0f172a; padding: 5px; border-radius: 8px; border: 1px solid #334155; }
+        .zone-btn { padding: 8px 20px; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; color: #94a3b8; background: transparent; transition: 0.3s; }
+        .zone-btn.active { background: #38bdf8; color: #0f172a; }
+
+        .toolbar { display: flex; gap: 10px; }
+        button { padding: 8px 15px; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; font-size: 14px; transition: 0.2s; }
+        .btn-edit { background-color: #f59e0b; color: white; }
+        .btn-edit:hover { background-color: #d97706; }
+        .btn-clear { background-color: #ef4444; color: white; display: none; }
+        .btn-save { background-color: #10b981; color: white; display: none; }
+        .btn-cancel { background-color: #64748b; color: white; display: none; }
+        .btn-test { background-color: #8b5cf6; color: white; }
+
+        .main-container { display: flex; flex: 1; padding: 20px; gap: 20px; height: calc(100vh - 65px); }
+
+        .camera-section { flex: 2; background: #1e293b; border-radius: 16px; padding: 10px; display: flex; flex-direction: column; position: relative; }
+        .camera-section h2 { font-size: 18px; margin-bottom: 10px; color: #cbd5e1; display: flex; justify-content: space-between;}
+        .zone-badge { background: #38bdf8; color: #0f172a; padding: 2px 10px; border-radius: 10px; font-size: 14px; }
+
+        .video-wrapper { position: relative; flex: 1; border-radius: 12px; background: #000; overflow: hidden; display: flex; justify-content: center; align-items: center; }
+        img#camera-feed { max-width: 100%; max-height: 100%; object-fit: contain; display: none; }
+        canvas#draw-canvas { position: absolute; z-index: 10; cursor: crosshair; display: none; }
+
+        .dashboard-section { flex: 1; display: flex; flex-direction: column; gap: 20px; min-width: 400px; overflow-y: auto; }
+        .summary-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; }
+        .card { background: #1e293b; padding: 20px; border-radius: 16px; text-align: center; border: 1px solid #334155; }
+        .card h3 { font-size: 14px; color: #94a3b8; }
+        .card .value { font-size: 36px; font-weight: bold; }
+        .val-total { color: #38bdf8; } .val-vacant { color: #10b981; } .val-occupied { color: #ef4444; }
+
+        .slots-container { flex: 1; background: #1e293b; border-radius: 16px; padding: 20px; border: 1px solid #334155; }
+        .slots-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top:15px; }
+        .slot-box { padding: 10px; border-radius: 8px; text-align: center; font-weight: bold; font-size: 16px; display: flex; flex-direction: column; transition: 0.3s; }
+        .slot-box span { font-size: 10px; font-weight: normal; opacity: 0.8; }
+        .slot-vacant { background: rgba(16, 185, 129, 0.1); border: 2px solid #10b981; color: #10b981; }
+        .slot-occupied { background: rgba(239, 68, 68, 0.1); border: 2px solid #ef4444; color: #ef4444; }
+
+        #status-msg { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: white; font-size: 18px; z-index: 5; pointer-events: none;}
+
+        #toast-container { position: fixed; bottom: 30px; right: 30px; z-index: 9999; display: flex; flex-direction: column; gap: 12px; }
+        .toast { padding: 15px 25px; border-radius: 8px; color: white; font-size: 16px; font-weight: bold; box-shadow: 0 4px 10px rgba(0,0,0,0.5); animation: slideIn 0.4s ease-out forwards; display: flex; align-items: center; gap: 10px; }
+        .toast.toast-occupied { background-color: #290a0a; border-left: 6px solid #ef4444; color: #fca5a5; }
+        .toast.toast-vacant { background-color: #062315; border-left: 6px solid #10b981; color: #6ee7b7; }
+        
+        @keyframes slideIn { from { transform: translateX(120%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        @keyframes fadeOut { from { transform: translateX(0); opacity: 1; } to { transform: translateX(120%); opacity: 0; } }
+    </style>
+</head>
+<body>
+    
+    <audio id="sound-in" src="/static/in.mp3" preload="auto"></audio>
+    <audio id="sound-out" src="/static/out.mp3" preload="auto"></audio>
+
+    <header>
+        <h1>🟢 Smart Parking AI</h1>
+        
+        <div class="zone-selector">
+            <button id="tab-zone1" class="zone-btn active" onclick="switchZone('zone1')">📍 โซน 1 (ลานหน้า)</button>
+            <button id="tab-zone2" class="zone-btn" onclick="switchZone('zone2')">📍 โซน 2 (ลานหลัง)</button>
+            <button id="tab-zone3" class="zone-btn" onclick="switchZone('zone3')">🎥 โซน 3 (กล้องเว็บแคม)</button>
+        </div>
+
+        <div class="toolbar">
+            <button id="btn-test" class="btn-test" style="display:none;" onclick="testNotification()">🔔 ทดสอบแจ้งเตือน</button>
+            <button id="btn-edit" class="btn-edit" onclick="startEditing()">✏️ วาดช่องจอดใหม่</button>
+            <button id="btn-clear" class="btn-clear" onclick="clearCanvas()">🗑️ ลบทั้งหมด</button>
+            <button id="btn-cancel" class="btn-cancel" onclick="cancelEditing()">❌ ยกเลิก</button>
+            <button id="btn-save" class="btn-save" onclick="saveZones()">💾 บันทึก</button>
+        </div>
+    </header>
+
+    <div class="main-container">
+        <div class="camera-section">
+            <h2 id="mode-title">
+                Live AI Analysis
+                <span id="current-zone-badge" class="zone-badge">โซน 1</span>
+            </h2>
+            <div class="video-wrapper">
+                <div id="status-msg">กำลังโหลด AI...</div>
+                <img id="camera-feed" src="" alt="Live Feed">
+                <canvas id="draw-canvas"></canvas>
+            </div>
+        </div>
+
+        <div class="dashboard-section">
+            <div class="summary-cards">
+                <div class="card"><h3>ทั้งหมด</h3><div class="value val-total" id="val-total">0</div></div>
+                <div class="card"><h3>ว่าง</h3><div class="value val-vacant" id="val-vacant">0</div></div>
+                <div class="card"><h3>ไม่ว่าง</h3><div class="value val-occupied" id="val-occupied">0</div></div>
+            </div>
+            <div class="slots-container">
+                <h2>สถานะรายช่องจอด</h2>
+                <div class="slots-grid" id="slots-grid"></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast-container"></div>
+
+    <script>
+        let scanInterval;
+        let isEditing = false;
+        
+        let currentZone = 'zone1';
+        let zoneNames = {
+            'zone1': 'โซน 1 (ลานหน้า)',
+            'zone2': 'โซน 2 (ลานหลัง)',
+            'zone3': 'โซน 3 (กล้องเว็บแคม)'
+        };
+
+        const canvas = document.getElementById('draw-canvas');
+        const ctx = canvas.getContext('2d');
+        const imgElement = document.getElementById('camera-feed');
+        
+        let originalImgWidth = 0;
+        let originalImgHeight = 0;
+        let drawnZones = []; 
+        let isDrawing = false;
+        let startX, startY;
+
+        let stableStatuses = { 'zone1': {}, 'zone2': {}, 'zone3': {} };     
+        let transitionCounters = { 'zone1': {}, 'zone2': {}, 'zone3': {} }; 
+        
+        const REQUIRED_SCANS = 3; 
+        let isInitialLoad = true; 
+
+        function switchZone(zoneId) {
+            if (isEditing) {
+                alert("กรุณาบันทึกหรือยกเลิกการวาดช่องจอดก่อนเปลี่ยนโซนครับ");
+                return;
+            }
+            
+            currentZone = zoneId;
+            isInitialLoad = true; 
+            
+            document.querySelectorAll('.zone-btn').forEach(btn => btn.classList.remove('active'));
+            document.getElementById('tab-' + zoneId).classList.add('active');
+            document.getElementById('current-zone-badge').innerText = zoneNames[zoneId];
+            
+            document.getElementById('status-msg').style.display = 'block';
+            document.getElementById('status-msg').innerText = "กำลังสลับกล้อง...";
+            imgElement.style.display = 'none';
+            fetchAI();
+        }
+
+        function playAlertSound(status) {
+            let audio = status === 'OCCUPIED' ? document.getElementById('sound-in') : document.getElementById('sound-out'); 
+            if (audio) {
+                audio.currentTime = 0; 
+                audio.play().catch(e => console.log("รอคลิกหน้าเว็บ"));
+            }
+        }
+
+        function showWebNotification(slotId, status) {
+            playAlertSound(status); 
+
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            
+            let zoneLabel = zoneNames[currentZone];
+
+            if (status === 'OCCUPIED') {
+                toast.className = 'toast toast-occupied';
+                toast.innerHTML = `🚨 <span><b>${zoneLabel} ช่อง ${slotId}</b> : มีรถเข้าจอดแล้ว!</span>`;
+            } else {
+                toast.className = 'toast toast-vacant';
+                toast.innerHTML = `✅ <span><b>${zoneLabel} ช่อง ${slotId}</b> : พื้นที่ว่างแล้ว!</span>`;
+            }
+
+            container.appendChild(toast);
+
+            setTimeout(() => {
+                toast.style.animation = 'fadeOut 0.5s ease-out forwards';
+                setTimeout(() => toast.remove(), 500); 
+            }, 5000);
+        }
+
+        function fetchAI() {
+            if (isEditing) return; 
+
+            fetch('/scan?zone=' + currentZone)
+                .then(r => r.json())
+                .then(data => {
+                    if(data.error) { document.getElementById('status-msg').innerText = data.error; document.getElementById('status-msg').style.display = 'block'; return; }
+
+                    document.getElementById('status-msg').style.display = 'none';
+                    imgElement.src = data.image;
+                    imgElement.style.display = 'block';
+
+                    originalImgWidth = data.img_width;
+                    originalImgHeight = data.img_height;
+
+                    document.getElementById('val-total').innerText = data.summary.total;
+                    document.getElementById('val-vacant').innerText = data.summary.vacant;
+                    document.getElementById('val-occupied').innerText = data.summary.occupied;
+
+                    const slotsGrid = document.getElementById('slots-grid');
+                    slotsGrid.innerHTML = ""; 
+                    
+                    for (let oldId in stableStatuses[currentZone]) {
+                        if (!data.details.hasOwnProperty(oldId)) {
+                            delete stableStatuses[currentZone][oldId];
+                            delete transitionCounters[currentZone][oldId];
+                        }
+                    }
+
+                    Object.keys(data.details).sort((a,b) => parseInt(a.slice(1)) - parseInt(b.slice(1))).forEach(id => {
+                        const currentStatus = data.details[id];
+                        
+                        if (!stableStatuses[currentZone][id]) {
+                            stableStatuses[currentZone][id] = currentStatus;
+                            transitionCounters[currentZone][id] = 0;
+                            if (!isInitialLoad) {
+                                showWebNotification(id, currentStatus);
+                            }
+                        } 
+                        else if (currentStatus !== stableStatuses[currentZone][id]) {
+                            transitionCounters[currentZone][id] = (transitionCounters[currentZone][id] || 0) + 1;
+                            if (transitionCounters[currentZone][id] >= REQUIRED_SCANS) {
+                                showWebNotification(id, currentStatus); 
+                                stableStatuses[currentZone][id] = currentStatus;    
+                                transitionCounters[currentZone][id] = 0;            
+                            }
+                        } 
+                        else {
+                            transitionCounters[currentZone][id] = 0;
+                        }
+
+                        const div = document.createElement('div');
+                        div.className = currentStatus === 'VACANT' ? 'slot-box slot-vacant' : 'slot-box slot-occupied';
+                        div.innerHTML = `${id} <span>${currentStatus === 'VACANT' ? 'ว่าง' : 'จอดแล้ว'}</span>`;
+                        slotsGrid.appendChild(div);
+                    });
+
+                    isInitialLoad = false;
+                }).catch(e => console.error(e));
+        }
+
+        scanInterval = setInterval(fetchAI, 500);
+        fetchAI();
+
+        function startEditing() {
+            isEditing = true;
+            document.getElementById('mode-title').innerText = `✏️ โหมดวาดช่องจอด (${zoneNames[currentZone]})`;
+            document.getElementById('btn-test').style.display = 'none';
+            document.getElementById('btn-edit').style.display = 'none';
+            document.getElementById('btn-clear').style.display = 'inline-block';
+            document.getElementById('btn-cancel').style.display = 'inline-block';
+            document.getElementById('btn-save').style.display = 'inline-block';
+            
+            document.querySelectorAll('.zone-btn').forEach(btn => btn.disabled = true);
+            
+            const rect = imgElement.getBoundingClientRect();
+            canvas.width = rect.width;
+            canvas.height = rect.height;
+            canvas.style.display = 'block';
+            drawnZones = []; 
+            redrawCanvas();
+        }
+
+        function cancelEditing() {
+            isEditing = false;
+            document.getElementById('mode-title').innerHTML = `Live AI Analysis <span id="current-zone-badge" class="zone-badge">${zoneNames[currentZone]}</span>`;
+            document.getElementById('btn-test').style.display = 'none';
+            document.getElementById('btn-edit').style.display = 'inline-block';
+            document.getElementById('btn-clear').style.display = 'none';
+            document.getElementById('btn-cancel').style.display = 'none';
+            document.getElementById('btn-save').style.display = 'none';
+            canvas.style.display = 'none';
+            
+            document.querySelectorAll('.zone-btn').forEach(btn => btn.disabled = false);
+        }
+
+        // 🟢 ฟังก์ชันนี้ถูกแก้ไขใหม่ให้ลบข้อมูลบนเซิร์ฟเวอร์ทันที
+        function clearCanvas() {
+            if (!confirm(`⚠️ ยืนยันการ "ลบช่องจอดทั้งหมด" ของ ${zoneNames[currentZone]} ทันทีใช่หรือไม่?`)) {
+                return; // ถ้ายกเลิก ไม่ต้องทำอะไร
+            }
+
+            // ส่งคำสั่งล้างค่าว่างไปที่เซิร์ฟเวอร์ทันที
+            fetch('/update_zones', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    zone_id: currentZone, 
+                    zones: {} // ส่ง object ว่างไปเพื่อลบ
+                })
+            })
+            .then(r => r.json())
+            .then(data => {
+                alert("ลบข้อมูลช่องจอดเรียบร้อยแล้ว!");
+                drawnZones = [];
+                redrawCanvas();
+                cancelEditing(); // สั่งให้ออกจากโหมดวาด
+                fetchAI(); // สั่งให้เซิร์ฟเวอร์ส่งรูปใหม่มา (รูปที่ไม่มีกรอบแล้ว)
+            });
+        }
+
+        function getMousePos(evt) {
+            const rect = canvas.getBoundingClientRect();
+            return { x: evt.clientX - rect.left, y: evt.clientY - rect.top };
+        }
+
+        canvas.addEventListener('mousedown', (e) => {
+            if (!isEditing) return;
+            isDrawing = true;
+            const pos = getMousePos(e);
+            startX = pos.x; startY = pos.y;
+        });
+
+        canvas.addEventListener('mousemove', (e) => {
+            if (!isDrawing) return;
+            const pos = getMousePos(e);
+            redrawCanvas();
+            ctx.strokeStyle = '#00ff00';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(startX, startY, pos.x - startX, pos.y - startY);
+        });
+
+        canvas.addEventListener('mouseup', (e) => {
+            if (!isDrawing) return;
+            isDrawing = false;
+            const pos = getMousePos(e);
+            
+            if (Math.abs(pos.x - startX) > 10 && Math.abs(pos.y - startY) > 10) {
+                drawnZones.push({
+                    x1: Math.min(startX, pos.x), y1: Math.min(startY, pos.y),
+                    x2: Math.max(startX, pos.x), y2: Math.max(startY, pos.y)
+                });
+            }
+            redrawCanvas();
+        });
+
+        function redrawCanvas() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = 'rgba(0, 255, 0, 0.2)';
+            ctx.strokeStyle = '#00ff00';
+            ctx.lineWidth = 2;
+            ctx.font = '16px Arial';
+            
+            drawnZones.forEach((zone, index) => {
+                const w = zone.x2 - zone.x1;
+                const h = zone.y2 - zone.y1;
+                ctx.fillRect(zone.x1, zone.y1, w, h);
+                ctx.strokeRect(zone.x1, zone.y1, w, h);
+                ctx.fillStyle = '#00ff00';
+                ctx.fillText(`P${index + 1}`, zone.x1 + 5, zone.y1 + 15);
+                ctx.fillStyle = 'rgba(0, 255, 0, 0.2)'; 
+            });
+        }
+
+        function saveZones() {
+            const finalZones = {};
+            
+            if (drawnZones.length === 0) {
+                if (!confirm(`⚠️ คุณยังไม่ได้วาดช่องจอดใหม่ ต้องการ "ลบช่องจอดทั้งหมด" ของ ${zoneNames[currentZone]} ใช่หรือไม่?`)) {
+                    return; 
+                }
+            } else {
+                const scaleX = originalImgWidth / canvas.width;
+                const scaleY = originalImgHeight / canvas.height;
+
+                drawnZones.forEach((zone, index) => {
+                    finalZones[`P${index + 1}`] = [
+                        Math.round(zone.x1 * scaleX), Math.round(zone.y1 * scaleY),
+                        Math.round(zone.x2 * scaleX), Math.round(zone.y2 * scaleY)
+                    ];
+                });
+            }
+
+            fetch('/update_zones', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    zone_id: currentZone, 
+                    zones: finalZones 
+                })
+            })
+            .then(r => r.json())
+            .then(data => {
+                if(document.getElementById('sound-in')) {
+                    document.getElementById('sound-in').load(); 
+                }
+                alert(data.message);
+                cancelEditing();
+                fetchAI(); 
+            });
+        }
+    </script>
+</body>
+</html>
